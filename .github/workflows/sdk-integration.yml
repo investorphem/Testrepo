@@ -1,0 +1,36 @@
+name: Stacks SDK Integration Test
+
+on:
+  push:
+    branches: [ main ]
+
+  pull_request:
+    branches: [ main ]
+
+  schedule:
+    - cron: "0 */4 * * *"   # runs every 6 hours (6 times daily)
+
+jobs:
+  test-examples:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [18, 20, 21]
+        project: [example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11, example12, example13]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install SDKs
+        run: |
+          cd examples/${{ matrix.project }}
+          npm install sbtc-payment-sdk stx-vault-sdk stx-defi-activity-sdk stx-portfolio-sdk stacks-pay-sdk hashlock-lending-sdk @investorphem/stx-validator-tools @investorphem/stx-utils @investorphem/validator-tools @investorphem/string-tools
+          npm list --depth=0
