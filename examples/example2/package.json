@@ -1,1 +1,6 @@
-examples/example2/package.json
+{
+  "name": "example2",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {}
+}
