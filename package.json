@@ -1,5 +1,5 @@
 {
-  "name": "stacks-sdk-integration-tests",
+  "name": "testsrepo",
   "private": true,
   "workspaces": [
     "examples/*"
