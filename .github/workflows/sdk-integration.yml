@@ -32,5 +32,5 @@ jobs:
       - name: Install SDKs
         run: |
           cd examples/${{ matrix.project }}
-          npm install sbtc-payment-sdk stx-vault-sdk stx-defi-activity-sdk stx-portfolio-sdk stacks-pay-sdk hashlock-lending-sdk @investorphem/stx-validator-tools @investorphem/stx-utils @investorphem/validator-tools @investorphem/string-tools masomind-sdk
+          npm install sbtc-payment-sdk stx-vault-sdk stx-defi-activity-sdk stx-portfolio-sdk stacks-pay-sdk hashlock-lending-sdk @investorphem/stx-validator-tools @investorphem/stx-utils @investorphem/validator-tools @investorphem/string-tools masomind-sdk @investorphem/hashlock-sdk
           npm list --depth=0
