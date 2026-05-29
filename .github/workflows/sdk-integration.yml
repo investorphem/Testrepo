@@ -6,52 +6,67 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Triggers every hour. The gatekeeper job will randomly decide if it proceeds.
     - cron: "0 * * * *"
 
 jobs:
-  gatekeeper:
+  prepare-random-environment:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.decide.outputs.should_run }}
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
       - name: Decide whether to run
         id: decide
         run: |
-          # 1. Always run if triggered by a push or PR
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Triggered by ${github.event_name}. Running job."
             exit 0
           fi
           
-          # 2. For scheduled runs, set a probability (e.g., 20% chance to run every hour)
-          # A 20% hourly chance averages roughly ~4-5 runs a day at completely random hours.
           CHANCE=20
           ROLL=$(( RANDOM % 100 ))
           
-          echo "Rolled a $ROLL against a $CHANCE% chance."
-          
           if [ $ROLL -lt $CHANCE ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Random condition met. Proceeding with tests."
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Random condition not met. Skipping tests."
           fi
 
-  test-examples:
-    needs: gatekeeper
-    # Only run this heavy matrix if the gatekeeper says "true"
-    if: needs.gatekeeper.outputs.should_run == 'true'
-    runs-on: ${{ matrix.os }}
+      - name: Generate Random Matrix
+        id: generate-matrix
+        # Only bother generating the matrix if we are actually going to run
+        if: steps.decide.outputs.should_run == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const osList = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
+            const nodeList = [18, 20, 21];
+            // Creates ['example1', 'example2', ... 'example13']
+            const projectList = Array.from({length: 13}, (_, i) => `example${i+1}`);
+            
+            // Helper to shuffle arrays
+            const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
+            
+            // Randomize our selections! 
+            // Here we pick 1 random OS, 1 random Node version, and 3 random projects.
+            const matrix = {
+              os: shuffle(osList).slice(0, 1),
+              'node-version': shuffle(nodeList).slice(0, 1),
+              project: shuffle(projectList).slice(0, 3)
+            };
+            
+            console.log("Generated random matrix:", matrix);
+            core.setOutput('matrix', matrix);
 
+  test-examples:
+    needs: prepare-random-environment
+    if: needs.prepare-random-environment.outputs.should_run == 'true'
+    
+    # We pull the randomized matrix JSON directly from the previous job
     strategy:
-      # Optional: Add max-parallel if you want to prevent hitting GitHub Actions concurrent limits
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [18, 20, 21]
-        project: [example1, example2, example3, example4, example5, example6, example7, example8, example9, example10, example11, example12, example13]
+      matrix: ${{ fromJSON(needs.prepare-random-environment.outputs.matrix) }}
+      
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repo
