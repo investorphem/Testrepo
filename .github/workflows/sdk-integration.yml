@@ -3,18 +3,51 @@ name: Stacks SDK Integration Test
 on:
   push:
     branches: [ main ]
-
   pull_request:
     branches: [ main ]
-
   schedule:
-    - cron: "0 */4 * * *"   # runs every 6 hours (6 times daily)
+    # Triggers every hour. The gatekeeper job will randomly decide if it proceeds.
+    - cron: "0 * * * *"
 
 jobs:
+  gatekeeper:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run
+        id: decide
+        run: |
+          # 1. Always run if triggered by a push or PR
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by ${github.event_name}. Running job."
+            exit 0
+          fi
+          
+          # 2. For scheduled runs, set a probability (e.g., 20% chance to run every hour)
+          # A 20% hourly chance averages roughly ~4-5 runs a day at completely random hours.
+          CHANCE=20
+          ROLL=$(( RANDOM % 100 ))
+          
+          echo "Rolled a $ROLL against a $CHANCE% chance."
+          
+          if [ $ROLL -lt $CHANCE ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Random condition met. Proceeding with tests."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Random condition not met. Skipping tests."
+          fi
+
   test-examples:
+    needs: gatekeeper
+    # Only run this heavy matrix if the gatekeeper says "true"
+    if: needs.gatekeeper.outputs.should_run == 'true'
     runs-on: ${{ matrix.os }}
 
     strategy:
+      # Optional: Add max-parallel if you want to prevent hitting GitHub Actions concurrent limits
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: [18, 20, 21]
