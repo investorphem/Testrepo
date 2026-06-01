@@ -1,6 +1,6 @@
 {
   "name": "testsrepo",
-  "private": tru,
+  "private": true,
   "workspaces": [
     "examples/*"
   ]
