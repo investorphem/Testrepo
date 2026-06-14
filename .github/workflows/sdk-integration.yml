@@ -15,7 +15,6 @@ jobs:
       should_run: ${{ steps.prepare.outputs.should_run }}
       matrix: ${{ steps.prepare.outputs.matrix }}
     steps:
-      # ✅ Single step — no inter-step output dependency at all
       - name: Decide and Generate Matrix
         id: prepare
         uses: actions/github-script@v7
@@ -28,11 +27,9 @@ jobs:
             let shouldRun = false;
 
             if (eventName !== 'schedule') {
-              // Always run on push / pull_request
               shouldRun = true;
               console.log('✅ Non-scheduled event — will always run');
             } else {
-              // 20% chance on schedule
               const CHANCE = 20;
               const roll = Math.floor(Math.random() * 100);
               shouldRun = roll < CHANCE;
@@ -43,21 +40,24 @@ jobs:
 
             if (!shouldRun) {
               console.log('⏭️ Skipping matrix generation');
-              // Set a safe empty sentinel so fromJSON never receives null
+              // ✅ Safe sentinel — test-examples is guarded by should_run
+              // so this matrix is never actually consumed
               core.setOutput('matrix', JSON.stringify({
-                os: ['ubuntu-latest'],
-                'node-version': [20],
-                project: ['skip'],
-                sdks: ['skip']
+                include: [{ os: 'ubuntu-latest', 'node-version': 20, project: 'none', sdks: '' }]
               }));
               return;
             }
 
-            // ── Generate random matrix ─────────────────────────────────────
-            const osList    = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
-            const nodeList  = [18, 20, 21];
+            // ── Helpers ────────────────────────────────────────────────────
+            const shuffle    = (arr) => [...arr].sort(() => Math.random() - 0.5);
+            const randInt    = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+            const randomPick = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
+
+            // ── Pools ──────────────────────────────────────────────────────
+            const osList      = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
+            const nodeList    = [18, 20, 21];
             const projectList = Array.from({ length: 13 }, (_, i) => `example${i + 1}`);
-            const sdkList   = [
+            const sdkList     = [
               'sbtc-payment-sdk',
               'stx-vault-sdk',
               'stx-defi-activity-sdk',
@@ -72,35 +72,56 @@ jobs:
               '@investorphem/hashlock-sdk'
             ];
 
-            const shuffle     = (arr) => [...arr].sort(() => Math.random() - 0.5);
-            const randInt     = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-            const randomPick  = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
+            // ── Random counts — truly unpredictable ───────────────────────
+            const selectedOS       = randomPick(osList,       1, osList.length);
+            const selectedNodes    = randomPick(nodeList,     1, nodeList.length);
+            const selectedProjects = randomPick(projectList,  1, 5);
+            // SDKs: each project-os-node combo gets its OWN random SDK set
+            // built inside the include matrix below
 
-            const osCount      = randInt(1, osList.length);
-            const nodeCount    = randInt(1, nodeList.length);
-            const projectCount = randInt(1, 5);
-            const sdkCount     = randInt(2, sdkList.length);
+            // ── Build explicit include matrix ─────────────────────────────
+            // Instead of relying on GitHub's matrix cross-product (which can
+            // behave oddly), we build every combination explicitly so each
+            // job gets its own independently randomised SDK list
+            const includes = [];
 
-            const selectedSDKs = randomPick(sdkList, sdkCount, sdkCount);
+            for (const os of selectedOS) {
+              for (const node of selectedNodes) {
+                for (const project of selectedProjects) {
+                  // Each combo picks its own random SDK count and selection
+                  const sdkCount    = randInt(2, sdkList.length);
+                  const selectedSDKs = randomPick(sdkList, sdkCount, sdkCount);
 
-            const matrix = {
-              os:            randomPick(osList,       osCount,      osCount),
-              'node-version': randomPick(nodeList,    nodeCount,    nodeCount),
-              project:        randomPick(projectList, projectCount, projectCount),
-              sdks:           [selectedSDKs.join(' ')]
-            };
+                  includes.push({
+                    os,
+                    'node-version': node,
+                    project,
+                    // ✅ Dynamic per-job SDK string — not shared across jobs
+                    sdks: selectedSDKs.join(' ')
+                  });
+                }
+              }
+            }
+
+            // ✅ Use explicit `include` format — most reliable matrix structure
+            const matrix = { include: includes };
 
             console.log(`\n📊 Matrix summary:`);
-            console.log(`   OS       : ${matrix.os.join(', ')}`);
-            console.log(`   Node     : ${matrix['node-version'].join(', ')}`);
-            console.log(`   Projects : ${matrix.project.join(', ')}`);
-            console.log(`   SDKs (${sdkCount}): ${selectedSDKs.join(', ')}`);
+            console.log(`   OS       : ${selectedOS.join(', ')}`);
+            console.log(`   Node     : ${selectedNodes.join(', ')}`);
+            console.log(`   Projects : ${selectedProjects.join(', ')}`);
+            console.log(`   Total jobs: ${includes.length}`);
+            includes.forEach((combo, i) => {
+              console.log(`\n   Job ${i + 1}: ${combo.os} | Node ${combo['node-version']} | ${combo.project}`);
+              console.log(`   SDKs: ${combo.sdks}`);
+            });
 
             core.setOutput('matrix', JSON.stringify(matrix));
 
   test-examples:
     needs: prepare-random-environment
-    if: ${{ needs.prepare-random-environment.outputs.should_run == 'true' }}
+    # ✅ Strict string check — never skips when it shouldn't
+    if: needs.prepare-random-environment.outputs.should_run == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-random-environment.outputs.matrix) }}
@@ -118,5 +139,6 @@ jobs:
       - name: Install SDKs
         run: |
           cd examples/${{ matrix.project }}
+          echo "📦 Installing SDKs: ${{ matrix.sdks }}"
           npm install ${{ matrix.sdks }}
           npm list --depth=0
