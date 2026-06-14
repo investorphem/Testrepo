@@ -12,40 +12,52 @@ jobs:
   prepare-random-environment:
     runs-on: ubuntu-latest
     outputs:
-      should_run: ${{ steps.decide.outputs.should_run }}
-      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+      should_run: ${{ steps.prepare.outputs.should_run }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
     steps:
-      - name: Decide whether to run
-        id: decide
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          
-          CHANCE=20
-          ROLL=$(( RANDOM % 100 ))
-          echo "🎲 Rolled $ROLL against threshold $CHANCE"
-          
-          if [ $ROLL -lt $CHANCE ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Decided: will run"
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "⏭️ Decided: will skip"
-          fi
-
-      - name: Generate Random Matrix
-        id: generate-matrix
-        # ✅ FIX: Read from env instead of steps context — always reliable
-        if: ${{ steps.decide.outputs.should_run == 'true' }}
+      # ✅ Single step — no inter-step output dependency at all
+      - name: Decide and Generate Matrix
+        id: prepare
         uses: actions/github-script@v7
         with:
           script: |
-            const osList = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
-            const nodeList = [18, 20, 21];
-            const projectList = Array.from({length: 13}, (_, i) => `example${i+1}`);
-            const sdkList = [
+            const eventName = context.eventName;
+            console.log(`🔔 Triggered by: ${eventName}`);
+
+            // ── Decide whether to run ──────────────────────────────────────
+            let shouldRun = false;
+
+            if (eventName !== 'schedule') {
+              // Always run on push / pull_request
+              shouldRun = true;
+              console.log('✅ Non-scheduled event — will always run');
+            } else {
+              // 20% chance on schedule
+              const CHANCE = 20;
+              const roll = Math.floor(Math.random() * 100);
+              shouldRun = roll < CHANCE;
+              console.log(`🎲 Scheduled roll: ${roll} vs threshold ${CHANCE} → ${shouldRun ? 'RUN' : 'SKIP'}`);
+            }
+
+            core.setOutput('should_run', String(shouldRun));
+
+            if (!shouldRun) {
+              console.log('⏭️ Skipping matrix generation');
+              // Set a safe empty sentinel so fromJSON never receives null
+              core.setOutput('matrix', JSON.stringify({
+                os: ['ubuntu-latest'],
+                'node-version': [20],
+                project: ['skip'],
+                sdks: ['skip']
+              }));
+              return;
+            }
+
+            // ── Generate random matrix ─────────────────────────────────────
+            const osList    = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
+            const nodeList  = [18, 20, 21];
+            const projectList = Array.from({ length: 13 }, (_, i) => `example${i + 1}`);
+            const sdkList   = [
               'sbtc-payment-sdk',
               'stx-vault-sdk',
               'stx-defi-activity-sdk',
@@ -60,41 +72,34 @@ jobs:
               '@investorphem/hashlock-sdk'
             ];
 
-            const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
-            const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-            const randomPick = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
+            const shuffle     = (arr) => [...arr].sort(() => Math.random() - 0.5);
+            const randInt     = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+            const randomPick  = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
 
-            const osCount = randInt(1, 3);
-            const nodeCount = randInt(1, 2);
+            const osCount      = randInt(1, osList.length);
+            const nodeCount    = randInt(1, nodeList.length);
             const projectCount = randInt(1, 5);
-            const sdkCount = randInt(2, sdkList.length);
+            const sdkCount     = randInt(2, sdkList.length);
 
             const selectedSDKs = randomPick(sdkList, sdkCount, sdkCount);
 
             const matrix = {
-              os: randomPick(osList, osCount, osCount),
-              'node-version': randomPick(nodeList, nodeCount, nodeCount),
-              project: randomPick(projectList, projectCount, projectCount),
-              sdks: [selectedSDKs.join(' ')]
+              os:            randomPick(osList,       osCount,      osCount),
+              'node-version': randomPick(nodeList,    nodeCount,    nodeCount),
+              project:        randomPick(projectList, projectCount, projectCount),
+              sdks:           [selectedSDKs.join(' ')]
             };
 
-            console.log(`🎲 This run: ${osCount} OS | ${nodeCount} Node | ${projectCount} projects | ${sdkCount} SDKs`);
-            console.log("📦 SDKs selected:", selectedSDKs);
-            console.log("🧩 Full matrix:", JSON.stringify(matrix, null, 2));
+            console.log(`\n📊 Matrix summary:`);
+            console.log(`   OS       : ${matrix.os.join(', ')}`);
+            console.log(`   Node     : ${matrix['node-version'].join(', ')}`);
+            console.log(`   Projects : ${matrix.project.join(', ')}`);
+            console.log(`   SDKs (${sdkCount}): ${selectedSDKs.join(', ')}`);
 
             core.setOutput('matrix', JSON.stringify(matrix));
 
-      # ✅ FIX: Add a fallback step so matrix output is never null
-      - name: Set skip matrix fallback
-        id: fallback
-        if: ${{ steps.decide.outputs.should_run != 'true' }}
-        run: |
-          echo "⏭️ Skipping — setting empty matrix sentinel"
-          echo "matrix={\"os\":[\"ubuntu-latest\"],\"node-version\":[20],\"project\":[\"skip\"],\"sdks\":[\"skip\"]}" >> "$GITHUB_OUTPUT"
-
   test-examples:
     needs: prepare-random-environment
-    # ✅ FIX: Explicit string comparison — avoids fromJSON(null) crash on skip
     if: ${{ needs.prepare-random-environment.outputs.should_run == 'true' }}
     strategy:
       fail-fast: false
