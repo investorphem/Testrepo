@@ -41,18 +41,56 @@ jobs:
             const osList = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
             const nodeList = [18, 20, 21];
             const projectList = Array.from({length: 13}, (_, i) => `example${i+1}`);
-            
-            const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
-            
+            const sdkList = [
+              'sbtc-payment-sdk',
+              'stx-vault-sdk',
+              'stx-defi-activity-sdk',
+              'stx-portfolio-sdk',
+              'stacks-pay-sdk',
+              'hashlock-lending-sdk',
+              '@investorphem/stx-validator-tools',
+              '@investorphem/stx-utils',
+              '@investorphem/validator-tools',
+              '@investorphem/string-tools',
+              'masomind-sdk',
+              '@investorphem/hashlock-sdk'
+            ];
+
+            // Shuffle helper
+            const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+
+            // Returns a random int between min and max (inclusive)
+            const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+            // Picks a random slice of an array — count is itself random between min and max
+            const randomPick = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
+
+            // OS: sometimes 1, sometimes 2, rarely all 3 — like a dev just picking whatever
+            const osCount = randInt(1, 3);
+
+            // Node: sometimes just one version, sometimes testing across two
+            const nodeCount = randInt(1, 2);
+
+            // Projects: anywhere from 1 to 5 — mimics a dev spot-checking examples
+            const projectCount = randInt(1, 5);
+
+            // SDKs: the wildcard — could be 2, could be all 12, truly unpredictable
+            const sdkCount = randInt(2, sdkList.length);
+
+            const selectedSDKs = randomPick(sdkList, sdkCount, sdkCount);
+
             const matrix = {
-              os: shuffle(osList).slice(0, 1),
-              'node-version': shuffle(nodeList).slice(0, 1),
-              project: shuffle(projectList).slice(0, 3)
+              os: randomPick(osList, osCount, osCount),
+              'node-version': randomPick(nodeList, nodeCount, nodeCount),
+              project: randomPick(projectList, projectCount, projectCount),
+              // Single array entry: space-joined SDK string used directly in npm install
+              sdks: [selectedSDKs.join(' ')]
             };
-            
-            console.log("Generated random matrix:", JSON.stringify(matrix, null, 2));
-            
-            // ✅ FIX: Serialize to JSON string before setting output
+
+            console.log(`🎲 This run: ${osCount} OS | ${nodeCount} Node | ${projectCount} projects | ${sdkCount} SDKs`);
+            console.log("📦 SDKs selected:", selectedSDKs);
+            console.log("🧩 Full matrix:", JSON.stringify(matrix, null, 2));
+
             core.setOutput('matrix', JSON.stringify(matrix));
 
   test-examples:
@@ -60,6 +98,9 @@ jobs:
     if: needs.prepare-random-environment.outputs.should_run == 'true'
     strategy:
       matrix: ${{ fromJSON(needs.prepare-random-environment.outputs.matrix) }}
+      # Don't cancel other matrix jobs if one fails
+      fail-fast: false
+
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -74,5 +115,5 @@ jobs:
       - name: Install SDKs
         run: |
           cd examples/${{ matrix.project }}
-          npm install sbtc-payment-sdk stx-vault-sdk stx-defi-activity-sdk stx-portfolio-sdk stacks-pay-sdk hashlock-lending-sdk @investorphem/stx-validator-tools @investorphem/stx-utils @investorphem/validator-tools @investorphem/string-tools masomind-sdk @investorphem/hashlock-sdk
+          npm install ${{ matrix.sdks }}
           npm list --depth=0
