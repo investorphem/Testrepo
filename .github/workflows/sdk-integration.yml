@@ -34,38 +34,32 @@ jobs:
 
       - name: Generate Random Matrix
         id: generate-matrix
-        # Only bother generating the matrix if we are actually going to run
         if: steps.decide.outputs.should_run == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const osList = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
             const nodeList = [18, 20, 21];
-            // Creates ['example1', 'example2', ... 'example13']
             const projectList = Array.from({length: 13}, (_, i) => `example${i+1}`);
             
-            // Helper to shuffle arrays
             const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
             
-            // Randomize our selections! 
-            // Here we pick 1 random OS, 1 random Node version, and 3 random projects.
             const matrix = {
               os: shuffle(osList).slice(0, 1),
               'node-version': shuffle(nodeList).slice(0, 1),
               project: shuffle(projectList).slice(0, 3)
             };
             
-            console.log("Generated random matrix:", matrix);
-            core.setOutput('matrix', matrix);
+            console.log("Generated random matrix:", JSON.stringify(matrix, null, 2));
+            
+            // ✅ FIX: Serialize to JSON string before setting output
+            core.setOutput('matrix', JSON.stringify(matrix));
 
   test-examples:
     needs: prepare-random-environment
     if: needs.prepare-random-environment.outputs.should_run == 'true'
-    
-    # We pull the randomized matrix JSON directly from the previous job
     strategy:
       matrix: ${{ fromJSON(needs.prepare-random-environment.outputs.matrix) }}
-      
     runs-on: ${{ matrix.os }}
 
     steps:
