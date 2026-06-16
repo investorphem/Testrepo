@@ -12,8 +12,8 @@ jobs:
   prepare-random-environment:
     runs-on: ubuntu-latest
     outputs:
-      should_run: ${{ steps.prepare.outputs.should_run }}
       matrix: ${{ steps.prepare.outputs.matrix }}
+      has_jobs: ${{ steps.prepare.outputs.has_jobs }}
     steps:
       - name: Decide and Generate Matrix
         id: prepare
@@ -33,18 +33,14 @@ jobs:
               const CHANCE = 20;
               const roll = Math.floor(Math.random() * 100);
               shouldRun = roll < CHANCE;
-              console.log(`🎲 Scheduled roll: ${roll} vs threshold ${CHANCE} → ${shouldRun ? 'RUN' : 'SKIP'}`);
+              console.log(`🎲 Roll: ${roll} vs ${CHANCE} → ${shouldRun ? 'RUN' : 'SKIP'}`);
             }
 
-            core.setOutput('should_run', String(shouldRun));
-
             if (!shouldRun) {
-              console.log('⏭️ Skipping matrix generation');
-              // ✅ Safe sentinel — test-examples is guarded by should_run
-              // so this matrix is never actually consumed
-              core.setOutput('matrix', JSON.stringify({
-                include: [{ os: 'ubuntu-latest', 'node-version': 20, project: 'none', sdks: '' }]
-              }));
+              console.log('⏭️ Skipping — outputting empty include list');
+              core.setOutput('matrix', JSON.stringify({ include: [] }));
+              // ✅ has_jobs is a NUMBER not a string — avoids all string comparison quirks
+              core.setOutput('has_jobs', '0');
               return;
             }
 
@@ -54,10 +50,10 @@ jobs:
             const randomPick = (arr, min, max) => shuffle(arr).slice(0, randInt(min, max));
 
             // ── Pools ──────────────────────────────────────────────────────
-            const osList      = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
-            const nodeList    = [18, 20, 21];
+            const osList = ['ubuntu-latest', 'windows-latest', 'macos-latest'];
+            const nodeList = [18, 20, 21];
             const projectList = Array.from({ length: 13 }, (_, i) => `example${i + 1}`);
-            const sdkList     = [
+            const sdkList = [
               'sbtc-payment-sdk',
               'stx-vault-sdk',
               'stx-defi-activity-sdk',
@@ -72,56 +68,47 @@ jobs:
               '@investorphem/hashlock-sdk'
             ];
 
-            // ── Random counts — truly unpredictable ───────────────────────
-            const selectedOS       = randomPick(osList,       1, osList.length);
-            const selectedNodes    = randomPick(nodeList,     1, nodeList.length);
-            const selectedProjects = randomPick(projectList,  1, 5);
-            // SDKs: each project-os-node combo gets its OWN random SDK set
-            // built inside the include matrix below
+            // ── Random selections ──────────────────────────────────────────
+            const selectedOS       = randomPick(osList,      1, osList.length);
+            const selectedNodes    = randomPick(nodeList,    1, nodeList.length);
+            const selectedProjects = randomPick(projectList, 1, 5);
 
-            // ── Build explicit include matrix ─────────────────────────────
-            // Instead of relying on GitHub's matrix cross-product (which can
-            // behave oddly), we build every combination explicitly so each
-            // job gets its own independently randomised SDK list
+            // ── Build explicit include matrix ──────────────────────────────
             const includes = [];
 
             for (const os of selectedOS) {
               for (const node of selectedNodes) {
                 for (const project of selectedProjects) {
-                  // Each combo picks its own random SDK count and selection
-                  const sdkCount    = randInt(2, sdkList.length);
+                  const sdkCount     = randInt(2, sdkList.length);
                   const selectedSDKs = randomPick(sdkList, sdkCount, sdkCount);
-
                   includes.push({
                     os,
                     'node-version': node,
                     project,
-                    // ✅ Dynamic per-job SDK string — not shared across jobs
                     sdks: selectedSDKs.join(' ')
                   });
                 }
               }
             }
 
-            // ✅ Use explicit `include` format — most reliable matrix structure
-            const matrix = { include: includes };
-
             console.log(`\n📊 Matrix summary:`);
-            console.log(`   OS       : ${selectedOS.join(', ')}`);
-            console.log(`   Node     : ${selectedNodes.join(', ')}`);
-            console.log(`   Projects : ${selectedProjects.join(', ')}`);
+            console.log(`   OS:         ${selectedOS.join(', ')}`);
+            console.log(`   Node:       ${selectedNodes.join(', ')}`);
+            console.log(`   Projects:   ${selectedProjects.join(', ')}`);
             console.log(`   Total jobs: ${includes.length}`);
-            includes.forEach((combo, i) => {
-              console.log(`\n   Job ${i + 1}: ${combo.os} | Node ${combo['node-version']} | ${combo.project}`);
-              console.log(`   SDKs: ${combo.sdks}`);
+            includes.forEach((c, i) => {
+              console.log(`\n   Job ${i+1}: ${c.os} | Node ${c['node-version']} | ${c.project}`);
+              console.log(`   SDKs: ${c.sdks}`);
             });
 
-            core.setOutput('matrix', JSON.stringify(matrix));
+            core.setOutput('matrix', JSON.stringify({ include: includes }));
+            // ✅ Output the COUNT — numeric comparison is unambiguous
+            core.setOutput('has_jobs', String(includes.length));
 
   test-examples:
     needs: prepare-random-environment
-    # ✅ Strict string check — never skips when it shouldn't
-    if: needs.prepare-random-environment.outputs.should_run == 'true'
+    # ✅ Compare against '0' — numeric string comparison, no true/false casting issues
+    if: needs.prepare-random-environment.outputs.has_jobs != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-random-environment.outputs.matrix) }}
@@ -139,6 +126,6 @@ jobs:
       - name: Install SDKs
         run: |
           cd examples/${{ matrix.project }}
-          echo "📦 Installing SDKs: ${{ matrix.sdks }}"
+          echo "📦 Installing: ${{ matrix.sdks }}"
           npm install ${{ matrix.sdks }}
           npm list --depth=0
